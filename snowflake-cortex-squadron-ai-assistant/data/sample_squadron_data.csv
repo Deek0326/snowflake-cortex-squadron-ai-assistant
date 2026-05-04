@@ -1,0 +1,22 @@
+mission_id,squadron,mission_type,aircraft_id,status,success_flag,readiness_score,delay_minutes,delay_reason,mission_notes
+1,Viper,Recon,VX-101,Success,true,92,0,,Nominal sortie
+2,Viper,Training,VX-102,Success,true,88,12,Runway,Brief runway hold
+3,Viper,Air Patrol,VX-102,Delayed,false,74,43,Weather,Weather cell over route
+4,Falcon,Recon,FX-201,Success,true,90,0,,Nominal sortie
+5,Falcon,Logistics,FX-201,Delayed,false,69,58,Maintenance,Hydraulic inspection extended
+6,Falcon,Training,FX-202,Failed,false,51,0,Avionics,Navigation system fault
+7,Raptor,Air Patrol,RX-301,Success,true,94,0,,Nominal sortie
+8,Raptor,Recon,RX-301,Success,true,91,0,,Nominal sortie
+9,Raptor,Training,RX-302,Success,true,87,18,Personnel,Minor crew availability delay
+10,Viper,Recon,VX-101,Success,true,93,0,,Nominal sortie
+11,Falcon,Air Patrol,FX-202,Delayed,false,66,77,Maintenance,Avionics replacement queue
+12,Raptor,Logistics,RX-301,Success,true,89,0,,Nominal sortie
+13,Viper,Training,VX-102,Success,true,90,0,,Nominal sortie
+14,Falcon,Recon,FX-201,Success,true,84,21,Fuel,Late refuel window
+15,Raptor,Air Patrol,RX-302,Delayed,false,73,64,Maintenance,Unexpected engine borescope
+16,Viper,Air Patrol,VX-101,Success,true,91,0,,Nominal sortie
+17,Falcon,Training,FX-202,Failed,false,49,0,Flight Controls,Flight control warning
+18,Raptor,Recon,RX-301,Success,true,96,0,,Nominal sortie
+19,Viper,Logistics,VX-102,Delayed,false,82,24,Parts,Awaited spare sensor delivery
+20,Falcon,Air Patrol,FX-201,Delayed,false,59,88,Maintenance,Hydraulic leak recurred during preflight
+21,Raptor,Training,RX-302,Success,true,76,11,Personnel,Late crew swap after fatigue review

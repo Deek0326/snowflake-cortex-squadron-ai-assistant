@@ -1,0 +1,2 @@
+"""Squadron AI Assistant package."""
+

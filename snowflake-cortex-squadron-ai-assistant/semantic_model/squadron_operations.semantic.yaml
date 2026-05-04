@@ -1,0 +1,305 @@
+name: SQUADRON_OPERATIONS
+description: Semantic model for natural-language analysis of squadron missions, readiness, personnel availability, and maintenance logs.
+comments: >
+  Use this model with Cortex Analyst so users can ask operational questions in natural language.
+  Business terms include success rate, delayed missions, readiness anomalies, aircraft down, personnel availability,
+  and weekly operations report.
+
+tables:
+  - name: missions
+    description: Mission-level operational records including outcome, readiness score, delays, and notes.
+    base_table:
+      database: SQUADRON_AI_DB
+      schema: OPERATIONS
+      table: MISSIONS
+    primary_key:
+      columns:
+        - mission_id
+    dimensions:
+      - name: mission_id
+        expr: mission_id
+        data_type: NUMBER
+        description: Unique mission identifier.
+      - name: squadron_name
+        expr: squadron_name
+        data_type: TEXT
+        description: Squadron responsible for the mission.
+        synonyms:
+          - squadron
+          - unit
+      - name: mission_type
+        expr: mission_type
+        data_type: TEXT
+        description: Mission category such as recon, training, logistics, or air patrol.
+      - name: aircraft_id
+        expr: aircraft_id
+        data_type: TEXT
+        description: Aircraft assigned to the mission.
+        synonyms:
+          - tail number
+          - aircraft
+      - name: status
+        expr: status
+        data_type: TEXT
+        description: Mission outcome status.
+      - name: delay_reason
+        expr: delay_reason
+        data_type: TEXT
+        description: Primary recorded cause of mission delay.
+    time_dimensions:
+      - name: mission_date
+        expr: mission_date
+        data_type: DATE
+        description: Date when the mission occurred.
+    facts:
+      - name: readiness_score
+        expr: readiness_score
+        data_type: NUMBER
+        description: Readiness score captured for the mission.
+      - name: delay_minutes
+        expr: delay_minutes
+        data_type: NUMBER
+        description: Number of minutes the mission was delayed.
+      - name: success_indicator
+        expr: IFF(success_flag, 1, 0)
+        data_type: NUMBER
+        description: Numeric indicator equal to 1 when the mission succeeded.
+    metrics:
+      - name: mission_count
+        expr: COUNT(mission_id)
+        description: Count of missions.
+      - name: success_count
+        expr: SUM(success_indicator)
+        description: Count of successful missions.
+      - name: success_rate
+        expr: SUM(success_indicator) / NULLIF(COUNT(mission_id), 0)
+        description: Percentage of missions that succeeded.
+        synonyms:
+          - mission success rate
+          - successful mission percentage
+      - name: average_delay_minutes
+        expr: AVG(delay_minutes)
+        description: Average mission delay in minutes.
+      - name: delayed_mission_count
+        expr: COUNT_IF(delay_minutes > 0)
+        description: Number of missions that had a delay.
+
+  - name: aircraft_readiness
+    description: Current aircraft readiness snapshots by squadron and aircraft.
+    base_table:
+      database: SQUADRON_AI_DB
+      schema: OPERATIONS
+      table: AIRCRAFT_READINESS
+    primary_key:
+      columns:
+        - aircraft_id
+    dimensions:
+      - name: aircraft_id
+        expr: aircraft_id
+        data_type: TEXT
+        description: Aircraft tail or asset identifier.
+      - name: squadron_name
+        expr: squadron_name
+        data_type: TEXT
+        description: Squadron assigned to the aircraft.
+      - name: aircraft_type
+        expr: aircraft_type
+        data_type: TEXT
+        description: Aircraft model or type.
+      - name: readiness_state
+        expr: readiness_state
+        data_type: TEXT
+        description: Current aircraft readiness state such as READY, LIMITED, or DOWN.
+        synonyms:
+          - aircraft status
+          - readiness status
+    time_dimensions:
+      - name: snapshot_date
+        expr: snapshot_date
+        data_type: DATE
+        description: Date of the readiness snapshot.
+      - name: next_inspection_date
+        expr: next_inspection_date
+        data_type: DATE
+        description: Next scheduled aircraft inspection date.
+    facts:
+      - name: readiness_score
+        expr: readiness_score
+        data_type: NUMBER
+        description: Numeric readiness score from 0 to 100.
+      - name: open_maintenance_items
+        expr: open_maintenance_items
+        data_type: NUMBER
+        description: Number of open maintenance discrepancies.
+    metrics:
+      - name: average_aircraft_readiness
+        expr: AVG(readiness_score)
+        description: Average aircraft readiness score.
+      - name: aircraft_down_count
+        expr: COUNT_IF(readiness_state = 'DOWN')
+        description: Number of aircraft currently down.
+      - name: readiness_anomaly_count
+        expr: COUNT_IF(readiness_state <> 'READY' OR readiness_score < 70 OR open_maintenance_items >= 3)
+        description: Count of aircraft that appear operationally anomalous.
+
+  - name: incident_reports
+    description: Operational incident reports with free-text descriptions and severity labels.
+    base_table:
+      database: SQUADRON_AI_DB
+      schema: OPERATIONS
+      table: INCIDENT_REPORTS
+    primary_key:
+      columns:
+        - incident_id
+    dimensions:
+      - name: incident_id
+        expr: incident_id
+        data_type: NUMBER
+        description: Unique incident report identifier.
+      - name: squadron_name
+        expr: squadron_name
+        data_type: TEXT
+        description: Squadron associated with the incident.
+      - name: aircraft_id
+        expr: aircraft_id
+        data_type: TEXT
+        description: Aircraft associated with the incident.
+      - name: severity
+        expr: severity
+        data_type: TEXT
+        description: Incident severity such as Low, Medium, or High.
+    time_dimensions:
+      - name: incident_date
+        expr: incident_date
+        data_type: DATE
+        description: Date of the incident.
+    metrics:
+      - name: incident_count
+        expr: COUNT(incident_id)
+        description: Count of incident reports.
+      - name: high_severity_incident_count
+        expr: COUNT_IF(severity IN ('High', 'Critical'))
+        description: Count of high-priority incidents.
+
+  - name: parts_inventory
+    description: Parts and supply inventory that can affect aircraft readiness and mission delays.
+    base_table:
+      database: SQUADRON_AI_DB
+      schema: OPERATIONS
+      table: PARTS_INVENTORY
+    dimensions:
+      - name: part_name
+        expr: part_name
+        data_type: TEXT
+        description: Name of the aircraft part or supply item.
+      - name: aircraft_id
+        expr: aircraft_id
+        data_type: TEXT
+        description: Aircraft associated with the part need.
+      - name: priority
+        expr: priority
+        data_type: TEXT
+        description: Supply priority level.
+    time_dimensions:
+      - name: expected_restock_date
+        expr: expected_restock_date
+        data_type: DATE
+        description: Date when restock is expected.
+    facts:
+      - name: quantity_on_hand
+        expr: quantity_on_hand
+        data_type: NUMBER
+        description: Current quantity available.
+      - name: reorder_point
+        expr: reorder_point
+        data_type: NUMBER
+        description: Inventory level that triggers replenishment.
+    metrics:
+      - name: parts_below_reorder_count
+        expr: COUNT_IF(quantity_on_hand <= reorder_point)
+        description: Count of part records at or below reorder point.
+
+  - name: personnel_availability
+    description: Personnel availability snapshots by squadron.
+    base_table:
+      database: SQUADRON_AI_DB
+      schema: OPERATIONS
+      table: PERSONNEL_AVAILABILITY
+    dimensions:
+      - name: squadron_name
+        expr: squadron_name
+        data_type: TEXT
+        description: Squadron name.
+    time_dimensions:
+      - name: snapshot_date
+        expr: snapshot_date
+        data_type: DATE
+        description: Date of the personnel snapshot.
+    facts:
+      - name: assigned_personnel
+        expr: assigned_personnel
+        data_type: NUMBER
+        description: Total assigned squadron personnel.
+      - name: available_personnel
+        expr: available_personnel
+        data_type: NUMBER
+        description: Personnel available for operations.
+      - name: pilots_available
+        expr: pilots_available
+        data_type: NUMBER
+        description: Pilots available for flight operations.
+      - name: maintenance_crew_available
+        expr: maintenance_crew_available
+        data_type: NUMBER
+        description: Maintenance staff available.
+    metrics:
+      - name: personnel_availability_rate
+        expr: SUM(available_personnel) / NULLIF(SUM(assigned_personnel), 0)
+        description: Percentage of assigned personnel who are available.
+
+verified_queries:
+  - name: highest_success_rate_last_month
+    question: Which squadron had the highest mission success rate last month?
+    sql: |
+      SELECT squadron_name,
+             COUNT(*) AS mission_count,
+             SUM(IFF(success_flag, 1, 0)) AS success_count,
+             SUM(IFF(success_flag, 1, 0)) / NULLIF(COUNT(*), 0) AS success_rate
+      FROM SQUADRON_AI_DB.OPERATIONS.MISSIONS
+      WHERE mission_date >= DATE_TRUNC('month', DATEADD(month, -1, CURRENT_DATE))
+        AND mission_date < DATE_TRUNC('month', CURRENT_DATE)
+      GROUP BY squadron_name
+      ORDER BY success_rate DESC
+      LIMIT 1;
+  - name: readiness_anomalies
+    question: Find anomalies in aircraft readiness.
+    sql: |
+      SELECT aircraft_id,
+             squadron_name,
+             aircraft_type,
+             readiness_state,
+             readiness_score,
+             open_maintenance_items
+      FROM SQUADRON_AI_DB.OPERATIONS.AIRCRAFT_READINESS
+      WHERE readiness_state <> 'READY'
+         OR readiness_score < 70
+         OR open_maintenance_items >= 3
+      ORDER BY readiness_score ASC;
+  - name: parts_supply_risk
+    question: Which parts or supplies are creating operational risk?
+    sql: |
+      SELECT part_name,
+             aircraft_id,
+             quantity_on_hand,
+             reorder_point,
+             expected_restock_date,
+             priority
+      FROM SQUADRON_AI_DB.OPERATIONS.PARTS_INVENTORY
+      WHERE quantity_on_hand <= reorder_point
+      ORDER BY quantity_on_hand ASC, priority ASC;
+  - name: weekly_squadron_risk
+    question: Generate a weekly squadron operations report.
+    sql: |
+      SELECT *
+      FROM SQUADRON_AI_DB.OPERATIONS.VW_SQUADRON_RISK
+      ORDER BY risk_score DESC;
