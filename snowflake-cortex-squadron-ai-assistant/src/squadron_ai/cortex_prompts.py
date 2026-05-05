@@ -2,8 +2,8 @@ from __future__ import annotations
 
 
 WEEKLY_REPORT_PROMPT = """
-You are an operations analyst supporting a squadron commander.
-Write a concise weekly squadron operations report using the supplied metrics and log excerpts.
+You are an operations analyst supporting a unit operations leader.
+Write a concise weekly unit operations report using the supplied metrics and log excerpts.
 Include:
 1. Mission performance
 2. Readiness risks
@@ -32,4 +32,3 @@ SELECT AI_COMPLETE(
 ) AS generated_text
 FROM context;
 """
-

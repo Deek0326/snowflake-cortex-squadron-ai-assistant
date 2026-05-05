@@ -1,9 +1,5 @@
 name: SQUADRON_OPERATIONS
-description: Semantic model for natural-language analysis of squadron missions, readiness, personnel availability, and maintenance logs.
-comments: >
-  Use this model with Cortex Analyst so users can ask operational questions in natural language.
-  Business terms include success rate, delayed missions, readiness anomalies, aircraft down, personnel availability,
-  and weekly operations report.
+description: Semantic model for natural-language analysis of unit missions, readiness, personnel availability, and maintenance logs.
 
 tables:
   - name: missions
@@ -23,9 +19,11 @@ tables:
       - name: squadron_name
         expr: squadron_name
         data_type: TEXT
-        description: Squadron responsible for the mission.
+        description: Unit responsible for the mission.
         synonyms:
-          - squadron
+          - unit
+          - team
+          - group
           - unit
       - name: mission_type
         expr: mission_type
@@ -85,7 +83,7 @@ tables:
         description: Number of missions that had a delay.
 
   - name: aircraft_readiness
-    description: Current aircraft readiness snapshots by squadron and aircraft.
+    description: Current aircraft readiness snapshots by unit and aircraft.
     base_table:
       database: SQUADRON_AI_DB
       schema: OPERATIONS
@@ -101,7 +99,7 @@ tables:
       - name: squadron_name
         expr: squadron_name
         data_type: TEXT
-        description: Squadron assigned to the aircraft.
+        description: Unit assigned to the aircraft.
       - name: aircraft_type
         expr: aircraft_type
         data_type: TEXT
@@ -159,7 +157,7 @@ tables:
       - name: squadron_name
         expr: squadron_name
         data_type: TEXT
-        description: Squadron associated with the incident.
+        description: Unit associated with the incident.
       - name: aircraft_id
         expr: aircraft_id
         data_type: TEXT
@@ -220,7 +218,7 @@ tables:
         description: Count of part records at or below reorder point.
 
   - name: personnel_availability
-    description: Personnel availability snapshots by squadron.
+    description: Personnel availability snapshots by unit.
     base_table:
       database: SQUADRON_AI_DB
       schema: OPERATIONS
@@ -229,7 +227,7 @@ tables:
       - name: squadron_name
         expr: squadron_name
         data_type: TEXT
-        description: Squadron name.
+        description: Unit name.
     time_dimensions:
       - name: snapshot_date
         expr: snapshot_date
@@ -239,7 +237,7 @@ tables:
       - name: assigned_personnel
         expr: assigned_personnel
         data_type: NUMBER
-        description: Total assigned squadron personnel.
+        description: Total assigned unit personnel.
       - name: available_personnel
         expr: available_personnel
         data_type: NUMBER
@@ -259,7 +257,7 @@ tables:
 
 verified_queries:
   - name: highest_success_rate_last_month
-    question: Which squadron had the highest mission success rate last month?
+    question: Which unit had the highest mission success rate last month?
     sql: |
       SELECT squadron_name,
              COUNT(*) AS mission_count,
@@ -298,7 +296,7 @@ verified_queries:
       WHERE quantity_on_hand <= reorder_point
       ORDER BY quantity_on_hand ASC, priority ASC;
   - name: weekly_squadron_risk
-    question: Generate a weekly squadron operations report.
+    question: Generate a weekly unit operations report.
     sql: |
       SELECT *
       FROM SQUADRON_AI_DB.OPERATIONS.VW_SQUADRON_RISK

@@ -44,7 +44,7 @@ FROM VW_OPERATIONAL_TEXT_CORPUS;
 -- AI_COMPLETE: summarize delayed missions and likely causes.
 SELECT AI_COMPLETE(
     'claude-4-sonnet',
-    'Summarize delayed missions and likely causes for squadron operations leadership: '
+    'Summarize delayed missions and likely causes for unit operations leadership: '
     || TO_JSON(ARRAY_AGG(OBJECT_CONSTRUCT(*)))
 ) AS delayed_mission_summary
 FROM (
@@ -53,10 +53,10 @@ FROM (
     WHERE delay_minutes > 0
 );
 
--- AI_COMPLETE: generate a weekly squadron operations report.
+-- AI_COMPLETE: generate a weekly unit operations report.
 SELECT AI_COMPLETE(
     'claude-4-sonnet',
-    'Generate a weekly squadron operations report with mission performance, readiness risks, personnel constraints, and recommendations: '
+    'Generate a weekly unit operations report with mission performance, readiness risks, personnel constraints, and recommendations: '
     || TO_JSON(ARRAY_AGG(OBJECT_CONSTRUCT(*)))
 ) AS weekly_operations_report
 FROM VW_SQUADRON_MISSION_PERFORMANCE;

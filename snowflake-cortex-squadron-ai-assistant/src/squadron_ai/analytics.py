@@ -16,6 +16,9 @@ class AssistantResponse:
     evidence: pd.DataFrame | None = None
     caveats: list[str] = field(default_factory=list)
     route: str = "demo"
+    latency_ms: int | None = None
+    evaluation: dict[str, str | int | bool] = field(default_factory=dict)
+    diagnostics: dict[str, str | int | bool] = field(default_factory=dict)
 
 
 def mission_success_by_squadron(missions: pd.DataFrame) -> pd.DataFrame:
@@ -169,7 +172,7 @@ def kpis(dataset: DemoDataset) -> dict[str, str]:
     availability = dataset.personnel["availability_rate"].mean()
     risk = operational_risk_by_squadron(dataset).iloc[0]
     return {
-        "Top squadron": str(success.iloc[0]["squadron"]),
+        "Top unit": str(success.iloc[0]["squadron"]),
         "Success rate": f"{success.iloc[0]['success_rate']:.0%}",
         "Delayed missions": str(len(delayed)),
         "Readiness anomalies": str(len(anomalies)),
@@ -191,10 +194,10 @@ def generate_weekly_report(dataset: DemoDataset) -> str:
         for row in delay_summary.itertuples()
     )
     return (
-        f"Weekly squadron operations report: {top['squadron']} leads mission execution with a "
+        f"Weekly unit operations report: {top['squadron']} leads mission execution with a "
         f"{top['success_rate']:.0%} success rate. {highest_risk['squadron']} carries the highest operational "
         f"risk because its success rate, personnel availability, readiness anomalies, and delay load combine to "
-        f"a risk score of {highest_risk['risk_score']}. Across the wing, {len(delayed)} missions were delayed "
+        f"a risk score of {highest_risk['risk_score']}. Across all units, {len(delayed)} missions were delayed "
         f"and {len(anomalies)} aircraft readiness anomalies require attention. Primary delay drivers are {delay_text}. "
         "Recommended actions: prioritize Falcon flight-control and hydraulic parts, keep RX-302 on shortened "
         "inspection intervals, protect Viper sensor restock, and review crew availability before high-tempo sorties."
@@ -312,7 +315,7 @@ ORDER BY readiness_score ASC;
     "weekly_report": """
 SELECT AI_COMPLETE(
   '<model>',
-  'Generate a weekly squadron operations report from metrics and retrieved evidence: '
+  'Generate a weekly unit operations report from metrics and retrieved evidence: '
   || TO_JSON(ARRAY_AGG(OBJECT_CONSTRUCT(*)))
 )
 FROM VW_SQUADRON_RISK;

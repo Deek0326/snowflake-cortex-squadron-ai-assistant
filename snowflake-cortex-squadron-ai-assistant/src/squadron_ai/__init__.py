@@ -1,2 +1,1 @@
-"""Squadron AI Assistant package."""
-
+"""Unit operations AI assistant package."""

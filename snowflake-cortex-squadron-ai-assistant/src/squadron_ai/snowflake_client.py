@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
@@ -28,7 +29,8 @@ class SnowflakeConfig:
 
 
 def load_config() -> SnowflakeConfig | None:
-    load_dotenv()
+    project_root = Path(__file__).resolve().parents[2]
+    load_dotenv(project_root / ".env", override=True)
     required = [
         "SNOWFLAKE_ACCOUNT",
         "SNOWFLAKE_USER",
@@ -87,14 +89,14 @@ class SnowflakeClient:
 
     def connect(self):
         if self._conn is None:
-            if self.config is None or self.config.password is None:
-                raise RuntimeError("Snowflake password credentials are not configured.")
+            if self.config is None or (self.config.password is None and self.config.pat is None):
+                raise RuntimeError("Snowflake credentials are not configured.")
             import snowflake.connector
 
             self._conn = snowflake.connector.connect(
                 account=self.config.account,
                 user=self.config.user,
-                password=self.config.password,
+                password=self.config.pat or self.config.password,
                 role=self.config.role,
                 warehouse=self.config.warehouse,
                 database=self.config.database,
@@ -103,10 +105,16 @@ class SnowflakeClient:
         return self._conn
 
     def query_df(self, sql: str) -> pd.DataFrame:
+        if self.config is not None:
+            sql = f"USE DATABASE {self.config.database}; USE SCHEMA {self.config.schema};\n{sql}"
         if self._session is not None:
             return self._session.sql(sql).to_pandas()
         conn = self.connect()
-        return pd.read_sql(sql, conn)
+        statements = _split_sql_statements(sql)
+        with conn.cursor() as cur:
+            for statement in statements[:-1]:
+                cur.execute(statement)
+        return pd.read_sql(statements[-1], conn)
 
     def execute_scalar(self, sql: str) -> str:
         if self._session is not None:
@@ -121,15 +129,65 @@ class SnowflakeClient:
     def ask(self, question: str) -> AssistantResponse:
         analyst = self.ask_cortex_analyst(question)
         if analyst.generated_sql:
-            df = self.query_df(analyst.generated_sql)
+            executable_sql = _normalize_cortex_sql(analyst.generated_sql)
+            normalized_sql = executable_sql != analyst.generated_sql
+            try:
+                df = self.query_df(executable_sql)
+            except Exception as exc:
+                fallback = self.answer_with_curated_sql(question)
+                fallback.diagnostics.update(
+                    {
+                        "attempts": 2,
+                        "cortex_sql_generated": True,
+                        "cortex_sql_normalized": normalized_sql,
+                        "fallback_reason": "cortex_sql_execution_failed",
+                        "retry_strategy": "normalize_cortex_sql_then_curated_sql",
+                    }
+                )
+                fallback.caveats.insert(
+                    0,
+                    f"Cortex Analyst generated SQL, but executing it failed: {str(exc).splitlines()[0]}",
+                )
+                fallback.generated_sql = (
+                    "-- Cortex Analyst generated SQL failed, so curated SQL fallback was used.\n"
+                    + analyst.generated_sql
+                    + "\n\n-- Normalized executable Cortex SQL:\n"
+                    + executable_sql
+                    + "\n\n-- Curated SQL fallback:\n"
+                    + (fallback.generated_sql or "")
+                )
+                return fallback
             analyst.result_table = df
+            analyst.generated_sql = executable_sql
+            analyst.diagnostics.update(
+                {
+                    "attempts": 1,
+                    "cortex_sql_generated": True,
+                    "cortex_sql_normalized": normalized_sql,
+                    "fallback_reason": "",
+                    "retry_strategy": "cortex_analyst_sql",
+                }
+            )
             analyst.evidence = self.search_evidence(question)
             if _is_report_question(question):
-                analyst.answer = self.generate_ai_summary(question, df, analyst.evidence)
-            elif not analyst.answer:
+                summary = self.generate_ai_summary(question, df, analyst.evidence)
+                if summary:
+                    analyst.answer = summary
+            if not analyst.answer:
                 analyst.answer = "Cortex Analyst generated SQL and returned the results below."
             return analyst
-        return self.answer_with_curated_sql(question)
+        fallback = self.answer_with_curated_sql(question)
+        fallback.caveats = analyst.caveats + fallback.caveats
+        fallback.diagnostics.update(
+            {
+                "attempts": 1,
+                "cortex_sql_generated": False,
+                "cortex_sql_normalized": False,
+                "fallback_reason": "cortex_analyst_no_sql",
+                "retry_strategy": "curated_sql",
+            }
+        )
+        return fallback
 
     def ask_cortex_analyst(self, question: str) -> AssistantResponse:
         if self.config is None or not self.config.pat:
@@ -159,9 +217,10 @@ class SnowflakeClient:
             timeout=45,
         )
         if response.status_code >= 400:
+            detail = response.text[:300].replace("\n", " ")
             return AssistantResponse(
                 answer="",
-                caveats=[f"Cortex Analyst REST returned HTTP {response.status_code}; using curated SQL fallback."],
+                caveats=[f"Cortex Analyst REST returned HTTP {response.status_code}: {detail}; using curated SQL fallback."],
                 route="snowflake-curated-sql",
             )
 
@@ -193,7 +252,17 @@ class SnowflakeClient:
             '{_sql_literal(params)}'
         ) AS SEARCH_RESPONSE
         """
-        raw = self.execute_scalar(sql)
+        try:
+            raw = self.execute_scalar(sql)
+        except Exception as exc:
+            return pd.DataFrame(
+                {
+                    "notice": [
+                        "Cortex Search evidence is unavailable. Run sql/03_cortex_objects.sql or continue with SQL-only Snowflake mode."
+                    ],
+                    "detail": [str(exc).splitlines()[0]],
+                }
+            )
         try:
             parsed = json.loads(raw)
             return pd.DataFrame(parsed.get("results", []))
@@ -209,16 +278,30 @@ class SnowflakeClient:
             "evidence": [] if evidence is None else evidence.head(10).to_dict(orient="records"),
         }
         prompt = (
-            "You are a squadron operations analyst. Answer the user's question using only this JSON context. "
+            "You are a unit operations analyst. Answer the user's question using only this JSON context. "
             "Be concise, include operational implications, and separate evidence from inference. Context: "
             + json.dumps(context, default=str)
         )
         sql = f"SELECT AI_COMPLETE('{self.config.cortex_model}', '{_sql_literal(prompt)}')"
-        return self.execute_scalar(sql)
+        try:
+            return self.execute_scalar(sql)
+        except Exception:
+            return ""
 
     def answer_with_curated_sql(self, question: str) -> AssistantResponse:
         lowered = question.lower()
-        caveats = ["Using curated SQL fallback. Configure SNOWFLAKE_PAT to enable Cortex Analyst NL-to-SQL."]
+        caveats = (
+            ["Using curated SQL fallback after Cortex Analyst did not return executable SQL."]
+            if self.config and self.config.pat
+            else ["Using curated SQL fallback. Configure SNOWFLAKE_PAT to enable Cortex Analyst NL-to-SQL."]
+        )
+        diagnostics = {
+            "attempts": 1,
+            "cortex_sql_generated": False,
+            "cortex_sql_normalized": False,
+            "fallback_reason": "curated_sql_route",
+            "retry_strategy": "curated_sql",
+        }
 
         if "highest" in lowered and "success" in lowered:
             sql = """
@@ -239,6 +322,7 @@ class SnowflakeClient:
                 evidence=self.search_evidence(question),
                 caveats=caveats,
                 route="snowflake-curated-sql",
+                diagnostics=diagnostics,
             )
 
         if "delay" in lowered or "delayed" in lowered:
@@ -252,20 +336,37 @@ class SnowflakeClient:
             ORDER BY total_delay_minutes DESC
             """
             df = self.query_df(sql)
-            answer = self.generate_ai_summary(question, df, self.search_evidence(question))
-            return AssistantResponse(answer, df, sql.strip(), self.search_evidence(question), caveats, "snowflake-ai-complete")
+            evidence = self.search_evidence(question)
+            answer = self.generate_ai_summary(question, df, evidence)
+            if not answer:
+                top = df.iloc[0]
+                answer = (
+                    f"The largest delay cluster is {top['DELAY_REASON']} for {top['SQUADRON_NAME']}, "
+                    f"totaling {int(top['TOTAL_DELAY_MINUTES'])} minutes across {int(top['DELAYED_MISSIONS'])} missions."
+                )
+                caveats.append("AI_COMPLETE is unavailable, so this response uses SQL summary fallback.")
+            return AssistantResponse(answer, df, sql.strip(), evidence, caveats, "snowflake-curated-sql", diagnostics=diagnostics)
 
         if "report" in lowered or "weekly" in lowered:
             sql = "SELECT * FROM VW_SQUADRON_RISK ORDER BY risk_score DESC"
             df = self.query_df(sql)
             evidence = self.search_evidence(question)
+            answer = self.generate_ai_summary(question, df, evidence)
+            if not answer:
+                top = df.iloc[0]
+                answer = (
+                    f"{top['SQUADRON_NAME']} has the highest current operational risk score at {top['RISK_SCORE']}. "
+                    "Review the risk table below for mission, readiness, delay, and personnel drivers."
+                )
+                caveats.append("AI_COMPLETE is unavailable, so this response uses SQL summary fallback.")
             return AssistantResponse(
-                self.generate_ai_summary(question, df, evidence),
+                answer,
                 df,
                 sql,
                 evidence,
                 caveats,
-                "snowflake-ai-complete",
+                "snowflake-curated-sql",
+                diagnostics=diagnostics,
             )
 
         if "part" in lowered or "supply" in lowered or "inventory" in lowered:
@@ -283,6 +384,7 @@ class SnowflakeClient:
                 self.search_evidence(question),
                 caveats,
                 "snowflake-curated-sql",
+                diagnostics=diagnostics,
             )
 
         sql = """
@@ -299,31 +401,66 @@ class SnowflakeClient:
             self.search_evidence(question),
             caveats,
             "snowflake-curated-sql",
+            diagnostics=diagnostics,
         )
 
 
 def _extract_analyst_content(body: dict[str, Any]) -> tuple[str | None, str, list[str]]:
     message = body.get("message", {})
-    content = message.get("content", [])
+    content = message.get("content") or body.get("content") or []
     sql: str | None = None
     text_parts: list[str] = []
     suggestions: list[str] = []
+
+    def visit(value: Any) -> None:
+        nonlocal sql
+        if isinstance(value, dict):
+            block_type = value.get("type")
+            if block_type == "sql":
+                sql = value.get("statement") or value.get("sql") or sql
+            elif block_type == "text":
+                text = value.get("text")
+                if text:
+                    text_parts.append(text)
+            elif block_type in {"suggestion", "suggestions"}:
+                suggestion_value = value.get("suggestions") or value.get("suggestion") or []
+                suggestions.extend(suggestion_value if isinstance(suggestion_value, list) else [str(suggestion_value)])
+            if "statement" in value and isinstance(value["statement"], str):
+                sql = value["statement"]
+            if "sql" in value and isinstance(value["sql"], str):
+                sql = value["sql"]
+            for child in value.values():
+                visit(child)
+        elif isinstance(value, list):
+            for item in value:
+                visit(item)
+
     for block in content:
-        block_type = block.get("type")
-        if block_type == "sql":
-            sql = block.get("statement") or block.get("sql")
-        elif block_type == "text":
-            text = block.get("text")
-            if text:
-                text_parts.append(text)
-        elif block_type in {"suggestion", "suggestions"}:
-            value = block.get("suggestions") or block.get("suggestion") or []
-            suggestions.extend(value if isinstance(value, list) else [str(value)])
+        visit(block)
     return sql, "\n\n".join(text_parts), suggestions
 
 
 def _sql_literal(value: str) -> str:
     return value.replace("\\", "\\\\").replace("'", "''")
+
+
+def _normalize_cortex_sql(sql: str) -> str:
+    replacements = {
+        "__missions": "MISSIONS",
+        "__aircraft_readiness": "AIRCRAFT_READINESS",
+        "__incident_reports": "INCIDENT_REPORTS",
+        "__parts_inventory": "PARTS_INVENTORY",
+        "__personnel_availability": "PERSONNEL_AVAILABILITY",
+    }
+    normalized = sql
+    for logical_name, table_name in replacements.items():
+        normalized = normalized.replace(logical_name, table_name)
+    normalized = normalized.replace("success_indicator", "IFF(success_flag, 1, 0)")
+    return normalized
+
+
+def _split_sql_statements(sql: str) -> list[str]:
+    return [statement.strip() for statement in sql.split(";") if statement.strip()]
 
 
 def _is_report_question(question: str) -> bool:

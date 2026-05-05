@@ -1,7 +1,7 @@
 USE DATABASE SQUADRON_AI_DB;
 USE SCHEMA OPERATIONS;
 
--- Which squadron had the highest mission success rate last month?
+-- Which unit had the highest mission success rate last month?
 SELECT
     squadron_name,
     COUNT(*) AS mission_count,
