@@ -249,11 +249,7 @@ The app and SQL examples use `AI_COMPLETE` to:
 - generate weekly unit operations reports
 - combine structured metrics with retrieved evidence
 
-## Portfolio Talking Points
 
-Use this summary in a resume, GitHub profile, or project walkthrough:
-
-> Built a Snowflake Cortex-powered Unit Operations AI Assistant using Snowflake, Cortex Analyst, Cortex Search, AI_COMPLETE, SQL, Snowpark/Python, and Streamlit. The project enables natural-language questions over operational unit data, retrieves supporting maintenance and incident evidence, identifies aircraft readiness anomalies, analyzes mission delay causes, and generates AI-powered weekly operations reports. It also includes a no-cost evaluation layer for route tracking, latency, fallback detection, semantic quality checks, SQL transparency, and answer grounding.
 
 ## Future Extensions
 
